@@ -1,0 +1,73 @@
+public void TrainS()
+    {
+        List<Single[]> data = new List<Single[]>();
+        var keyFirst = dictionary.Keys.First();
+        var keyCount = dictionary.Keys.Count();
+        var valuesFirst = dictionary[keyFirst];
+        foreach(var val in valuesFirst)
+        {
+            Single[] row = new Single[keyCount];
+            data.Add(row);
+        }
+        int i = 0;
+        foreach(var key in Keys)
+        {
+            var values = dictionary[key];
+            int j = 0;
+            foreach(var val in values)
+            {
+                data[j][i] = Convert.ToSingle(val);
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        //above code is about sorting data in a proper structure
+
+        MLContext mlContext = new MLContext();
+
+        //property of the type we need
+        var properties = new List<DynamicTypeProperty>(){ };
+        foreach (string key in Keys)
+        {
+            var d = new DynamicTypeProperty(key, typeof(float));
+            properties.Add(d);
+        }
+        // create the new type
+        var dynamicType = DynamicType.CreateDynamicType(properties);
+        //create a schema
+        var schema = SchemaDefinition.Create(dynamicType);
+
+        //list of our data
+        var dynamicList = DynamicType.CreateDynamicList(dynamicType);
+        // get an action that will add to the list
+        var addAction = DynamicType.GetAddAction(dynamicList);
+        object[] test = new object[3];
+        // call the action, with an object[] containing parameters in exact order added
+        foreach(var da in data)
+        {
+            object[] s = new object[da.Count()];
+            int v = 0;
+            foreach(var a in da)
+            {
+                s[v] = a;
+                v = v + 1;
+            }
+            addAction.Invoke(s);
+        }
+        // call add action again for each row.
+        var dataType = mlContext.Data.GetType();
+        var loadMethodGeneric = dataType.GetMethods().First(method => method.Name == "LoadFromEnumerable" && method.IsGenericMethod);
+        var loadMethod = loadMethodGeneric.MakeGenericMethod(dynamicType);
+        var trainData = (IDataView)loadMethod.Invoke(mlContext.Data, new[] { dynamicList, schema });
+        var pipeline = mlContext.Transforms.CopyColumns(outputColumnName: "Label", inputColumnName: "price")
+       .Append(mlContext.Transforms.Concatenate("Features", "fee", "count"))
+       .Append(mlContext.Regression.Trainers.FastTree());
+        var model = pipeline.Fit(trainData);
+        //test prediction engine
+        dynamic dynamicPredictionEngine;
+        var genericPredictionMethod = mlContext.Model.GetType().GetMethod("CreatePredictionEngine", new[] { typeof(ITransformer), typeof(DataViewSchema) });
+        var predictionMethod = genericPredictionMethod.MakeGenericMethod(dynamicType, typeof(TrainResult));
+        dynamicPredictionEngine = predictionMethod.Invoke(mlContext.Model, new object[] { model, trainData.Schema});
+        var predictMethod = dynamicPredictionEngine.GetType().GetMethod("Predict", new[] { dynamicType });
+        var predict = predictMethod.Invoke(dynamicPredictionEngine, new[] { dynamicList.First() });
+    }
